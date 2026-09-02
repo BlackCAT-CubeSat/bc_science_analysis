@@ -1,3 +1,7 @@
+"""Produces sky images when provided appropriate BlackCAT CalDB and
+events.
+"""
+
 from functools import cached_property
 from os import PathLike
 from typing import Any, Optional, overload
@@ -9,6 +13,8 @@ from science_analysis.bc_instrument import BCInstrument
 
 
 class BCImager:
+    """FFT image algorithm for BlackCAT coded aperture imaging."""
+
     @overload
     def __init__(
         self,
@@ -41,6 +47,27 @@ class BCImager:
         balance_per_det: bool | npt.NDArray[np.floating[Any] | np.integer[Any]] = True,
         hide_frame: bool = True,
     ):
+        """BlackCAT coded mask image reconstruction using FFT correlation.
+
+        Arguments:
+            - caldb_version: (Optional) BlackCAT CalDB version string.
+            Mutually exclusive with coded_mask_file and teldef_file.
+            - coded_mask_file: (Optional) Path to BlackCAT Aperture
+            CalDB file. Mutually exclusive with caldb_version.
+            - teldef_file: (Optional) Path to BlackCAT Teldef CalDB
+            file. Mutually exclusive with caldb_version.
+            - use_subpixel: Whether or not to use subpixels for
+            imaging. Very memory heavy.
+            - resolution: Imaging resolution (detector [sub]pixel size
+            projected by focal length). 1=Finest (detector [sub]pixel
+            size). 8 or 24 = Coarsest (mask cell size. 8 if not
+            use_subpixel, 24 if use_subpixel.)
+            - balance_per_det: Whether to balance each of the four
+            detector DPHs individually. Uses provided array of
+            bounding boxes, or generates based on CalDB if 'True'.
+            - hide_frame: Sets the support structure opacity to 50% to
+            compensate for edge shadow pattern.
+        """
         self._instrument = BCInstrument(
             caldb_version, coded_mask_file, teldef_file, use_subpixel
         )
@@ -51,10 +78,19 @@ class BCImager:
 
     @property
     def instrument(self) -> BCInstrument:
+        """BlackCAT instrument object in use by current instance of
+        BCImager.
+        """
         return self._instrument
 
     @cached_property
     def balance_boxes(self) -> bool | npt.NDArray[np.float64]:
+        """Bounding boxes to be used for balancing each detector plane
+        histogram individually.
+
+        Takes the form [[[satzlow0, satylow0], [satzhigh0, satyhigh0]],
+        ..., [[satzlown, satylown], [satzhighn, satyhighn]]]
+        """
         balance = (
             self._instrument.detector_boxes
             if self._balance_per_det
@@ -64,6 +100,9 @@ class BCImager:
 
     @cached_property
     def dph_minshape(self) -> npt.NDArray[np.uint32]:
+        """Shape that the full focal plane detector plane histogram
+        will take.
+        """
         dph_minsize = (
             self._instrument.fpa_pixel_counts / self._resolution_detpix
         ).astype(np.uint32)
@@ -72,6 +111,9 @@ class BCImager:
 
     @cached_property
     def exposed_area_maps(self) -> dict[int, npt.NDArray[np.float64]]:
+        """Dictionary of exposed area maps for how much area each sky
+        pixel can see on each of the four detectors. Values are in m^2.
+        """
         sky_yidc, sky_xidc = np.indices(self.image_minshape, dtype=np.float64)
         # Image is viewed from FPA through the mask, so it is inverted
         # along the x-axis compared to the others
@@ -116,14 +158,19 @@ class BCImager:
 
     @cached_property
     def image_fftshape(self) -> npt.NDArray[np.uint32]:
+        """Shape the image fft arrays will take."""
         return 2 ** np.ceil(np.log2(self.image_minshape)).astype(np.uint32)
 
     @cached_property
     def image_minshape(self) -> npt.NDArray[np.uint32]:
+        """Shape the final sky image will take."""
         return (self.dph_minshape + self.mask_minshape).astype(np.uint32)
 
     @cached_property
     def mask_for_correlate(self) -> npt.NDArray[np.complex64]:
+        """Complex-valued array generated from the mask pattern to
+        correlate with the detector plane histogram.
+        """
         expansion = np.round(1 / self.resolution_maskpix).astype(np.uint64)
         if not np.allclose(1 / expansion, self.resolution_maskpix):
             raise NotImplementedError("Can only scale mask by integer currently.")
@@ -156,6 +203,9 @@ class BCImager:
 
     @cached_property
     def mask_minshape(self) -> npt.NDArray[np.uint32]:
+        """Shape the scaled mask pattern array will take. Depends on
+        resolution.
+        """
         mask_minsize = (
             self._instrument.mask_cell_count / self.resolution_maskpix
         ).astype(np.uint32)
@@ -164,6 +214,7 @@ class BCImager:
 
     @cached_property
     def resolution_maskpix(self) -> npt.NDArray[np.float64]:
+        """Resolution array used for expanding the mask pattern."""
         return (
             self._resolution_detpix
             * self._instrument.fpa_pix_size_array
@@ -172,16 +223,20 @@ class BCImager:
 
     @cached_property
     def sky_pixel_size_deg(self) -> npt.NDArray[np.float64]:
+        """Tangent plane projection sky pixel size in degress."""
         return np.rad2deg(self.sky_pixel_size_rad)
 
     @cached_property
     def sky_pixel_size_rad(self) -> npt.NDArray[np.float64]:
+        """Tangent plane projection sky pixel size in radians."""
         sky_pix_size_rad = np.arctan(
             self._instrument.fpa_pix_size_array / self._instrument.teldef.focallen
         ).astype(np.float64)
         return sky_pix_size_rad
 
-    def counts_to_dph(self, counts: npt.NDArray[np.void]) -> npt.NDArray[np.float32]:
+    def _counts_to_dph(self, counts: npt.NDArray[np.void]) -> npt.NDArray[np.float32]:
+        # Convert eventlist counts to a detector plane histogram.
+
         _, satys, satzs = self.instrument.teldef.detxyz_to_satxyz(
             counts["DETX"], counts["DETY"]
         )
@@ -231,7 +286,9 @@ class BCImager:
 
         return dph
 
-    def dph_to_image(self, dph: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
+    def _dph_to_image(self, dph: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
+        # Convert detector plane histogram to a projected sky image.
+
         dph_expanded = np.zeros(self.image_fftshape, dtype=np.float32)
         # Need to flip dphx when expanding to match desired alignment
         dph_expanded[: dph.shape[0], : dph.shape[1]] = dph[:, ::-1]
@@ -243,15 +300,22 @@ class BCImager:
         return image
 
     def image_counts(self, counts: npt.NDArray[np.void]) -> npt.NDArray[np.float32]:
-        dph = self.counts_to_dph(counts)
-        return self.dph_to_image(dph)
+        """Generate sky image from eventlists counts.
+
+        Arguments:
+            - counts: Structured array containing data for each event.
+        """
+        dph = self._counts_to_dph(counts)
+        return self._dph_to_image(dph)
 
     @staticmethod
     def fft_forward(
         reals: npt.NDArray[np.floating[Any] | np.integer[Any]],
     ) -> npt.NDArray[np.complex64]:
+        """Encapsulates the numpy fft.rfft2 function."""
         return np.fft.rfft2(reals).astype(np.complex64)
 
     @staticmethod
     def fft_inverse(complexes: npt.NDArray[np.complex64]) -> npt.NDArray[np.float64]:
+        """Encapsulates the numpy fft.irfft2 function."""
         return np.fft.irfft2(complexes).astype(np.float64)
