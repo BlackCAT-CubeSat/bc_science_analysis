@@ -1,18 +1,35 @@
 """Module for running image-related analysis of BlackCAT eventlists."""
 
-from collections.abc import Collection, Iterable
+from collections.abc import Collection
 from os import PathLike
 from pathlib import Path
 from typing import Any, Optional, overload
+import warnings
 
 from astropy.io import fits
+from astropy.wcs import FITSFixedWarning, WCS
 import numpy as np
 import numpy.typing as npt
+from photutils.detection import find_peaks
+from photutils.utils.exceptions import NoDetectionsWarning
+from scipy.ndimage import uniform_filter
 
 from science_analysis import BCImager
 
 
 class BCImageAnalysis:
+    IMPEAK_DTYPE = np.dtype(
+        [
+            ("xy", (float, 2)),
+            ("radec", (float, 2)),  # Degrees, ICRS
+            ("counts", float),
+            ("local_rms", float),
+            ("global_rms", float),
+            ("local_sig", float),
+            ("global_sig", float),
+        ]
+    )
+
     @overload
     def __init__(
         self,
@@ -178,6 +195,65 @@ class BCImageAnalysis:
 
         return image_hdu
 
+    def find_peaks(
+        self,
+        image: npt.NDArray[np.floating[Any] | np.integer[Any]],
+        header: Optional[fits.Header] = None,
+        min_sigma: float = 6.0,
+        neighborhood_psf: int = 40,
+    ) -> Any:
+        """Identify peaks within the image with a significance of
+        min_sigma times the local RMS or higher.
+
+        Returns peak location (both in image coordinates and RA/DEC if
+        able), peak value in counts, local and global RMS, and local
+        and global significance.
+
+        Arguments:
+            - image: BlackCAT sky image array.
+            - header: Image header to grab WCS keywords from if
+            provided.
+            - min_sigma: The minimum multiplier of the local RMS
+            necessary to be identified as a peak.
+            - neighborhood_psf: Sidelength of neighborhood in mask cells
+        """
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", NoDetectionsWarning)
+            local_rms = self.local_rms(image, neighborhood_psf)
+            peaks = find_peaks(image / local_rms, threshold=min_sigma)
+
+            if peaks is None or len(peaks) == 0:
+                return np.zeros(shape=0, dtype=self.IMPEAK_DTYPE)
+            else:
+                locations = np.round(
+                    np.array([peaks["x_peak"], peaks["y_peak"]]).T
+                ).astype(int)
+
+            npeaks = len(locations)
+            result = np.zeros(shape=npeaks, dtype=self.IMPEAK_DTYPE)
+
+            result["xy"] = locations
+            result["radec"] = np.full(locations.shape, np.nan)
+            if header is not None:
+                warnings.simplefilter("ignore", FITSFixedWarning)
+                wcs = WCS(header)
+                if wcs.has_celestial:
+                    result["radec"] = wcs.all_pix2world(locations, 0, ra_dec_order=True)
+                else:
+                    warnings.warn(
+                        "A header was provided, but no WCS was found. Can't "
+                        "convert peak locations to RA and DEC.",
+                        RuntimeWarning,
+                    )
+            result["counts"] = image[locations[:, 1], locations[:, 0]]
+            result["local_rms"] = local_rms[locations[:, 1], locations[:, 0]]
+            result["global_rms"] = image.std()
+            result["local_sig"] = result["impeak"] / result["local_rms"]
+            result["global_sig"] = result["impeak"] / result["global_rms"]
+
+        return result
+
     def get_exposed_area_map(
         self, active_det_ids: npt.ArrayLike[np.integer[Any]]
     ) -> npt.NDArray[np.float64]:
@@ -196,6 +272,29 @@ class BCImageAnalysis:
             exposed_area_map += self.imager.exposed_area_maps[det_id]
 
         return exposed_area_map
+
+    def local_rms(
+        self,
+        image: npt.NDArray[np.floating[Any] | np.integer[Any]],
+        neighborhood_psf: int = 40,
+    ) -> npt.NDArray[np.floating[Any] | np.integer[Any]]:
+        """Get the RMS in the vicinity of each point in the image.
+
+        Specifically, in a neighborhood that is a square with each side
+        length being equal to neighborhood_psf mask cell sizes.
+
+        Arguments:
+            - image: BlackCAT sky image array.
+            - neighborhood_psf: Sidelength of neighborhood in mask cells
+        """
+        neighborhood_psf = (
+            2 * (neighborhood_psf / (2 * self.imager.resolution_maskpix)).astype(int)
+            + 1
+        )
+
+        # Local variance (mean square) may be slightly negative due to precision.
+        local_ms = uniform_filter(image**2, size=neighborhood_psf, mode="constant")
+        return np.sqrt(np.clip(local_ms, np.finfo(float).eps, None))
 
     @overload
     def set_ra_dec_roll(self, ra: Collection[float]) -> None: ...
