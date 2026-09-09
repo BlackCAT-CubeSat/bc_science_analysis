@@ -86,7 +86,7 @@ class BCInstrument:
 
     @cached_property
     def detector_boxes(self) -> npt.NDArray[np.float64]:
-        """[[satz_min, saty_min], [satz_max, saty_max]] bounding boxes
+        """[[detx_min, dety_min], [detx_max, dety_max]] bounding boxes
         for each of the four detectors.
         """
         detcorners_rawxs = np.array([0, 0, 1650, 1650], dtype=np.float64)
@@ -99,17 +99,16 @@ class BCInstrument:
             detxs, detys = self._teldef.rawxy_to_detxy(
                 detcorners_rawxs, detcorners_rawys, detcorners_detids
             )
-            _, satys, satzs = self._teldef.detxyz_to_satxyz(detxs, detys)
             detector_boxes.append(
                 np.array(
                     [
                         [
-                            np.min(satzs) - 0.5 * self._teldef.raw_xscl,
-                            np.min(satys) - 0.5 * self._teldef.raw_yscl,
+                            np.min(detxs) - 0.5 * self._teldef.raw_xscl,
+                            np.min(detys) - 0.5 * self._teldef.raw_yscl,
                         ],
                         [
-                            np.max(satzs) + 0.5 * self._teldef.raw_xscl,
-                            np.max(satys) + 0.5 * self._teldef.raw_xscl,
+                            np.max(detxs) + 0.5 * self._teldef.raw_xscl,
+                            np.max(detys) + 0.5 * self._teldef.raw_xscl,
                         ],
                     ],
                     dtype=np.float64,
@@ -120,18 +119,13 @@ class BCInstrument:
 
     @cached_property
     def fpa_envelope(self) -> npt.NDArray[np.float64]:
-        """[[satz_min, saty_min], [satz_max, saty_max]] bounding box
+        """[[detx_min, dety_min], [detx_max, dety_max]] bounding box
         for full focal plane array.
         """
-        _, [saty_max, saty_min], [satz_max, satz_min] = self._teldef.detxyz_to_satxyz(
-            np.array([self._teldef.detx_min, self._teldef.detx_max]),
-            np.array([self._teldef.dety_min, self._teldef.dety_max]),
-        )
-
         fpa_envelope = np.array(
             [
-                [satz_min, saty_min],
-                [satz_max, saty_max],
+                [self._teldef.detx_min, self._teldef.dety_min],
+                [self._teldef.detx_max, self._teldef.dety_max],
             ],
             dtype=np.float64,
         )
@@ -141,14 +135,14 @@ class BCInstrument:
     @cached_property
     def fpa_pixel_counts(self) -> npt.NDArray[np.uint16]:
         """Nearest integer number of focal plane [sub]pixels along the
-        SATZ and SATY axes, when accounting for the gaps.
+        DETX and DETY axes, when accounting for the gaps.
         """
-        satz_length, saty_length = np.diff(self.fpa_envelope, axis=0)[0]
+        detx_length, dety_length = np.diff(self.fpa_envelope, axis=0)[0]
 
         # Round up to make sure we catch all potential hit pixels
         fpa_pixel_counts = np.ceil(
             np.array(
-                [satz_length / self.satz_pix_size, saty_length / self.saty_pix_size]
+                [detx_length / self.detx_pix_size, dety_length / self.dety_pix_size]
             )
         ).astype(np.uint16)
 
@@ -156,21 +150,21 @@ class BCInstrument:
 
     @cached_property
     def fpa_pix_size_array(self) -> npt.NDArray[np.float64]:
-        """Focal plane array [sub]pixel sizes along the SATZ and SATY
+        """Focal plane array [sub]pixel sizes along the DETX and DETY
         axes.
         """
-        return np.array([self.satz_pix_size, self.saty_pix_size], dtype=np.float64)
+        return np.array([self.detx_pix_size, self.dety_pix_size], dtype=np.float64)
 
     @cached_property
     def mask_cell_count(self) -> npt.NDArray[np.uint32]:
-        """Nearest number of mask cells along the SATZ and SATY axes,
+        """Nearest number of mask cells along the DETX and DETY axes,
         when accounting for the support structures.
         """
         return np.array(self._coded_mask.mask_pattern.shape[::-1], dtype=np.uint32)
 
     @cached_property
     def mask_envelope(self) -> npt.NDArray[np.float64]:
-        """[[satz_min, saty_min], [satz_max, saty_max]] bounding box
+        """[[detx_min, dety_min], [detx_max, dety_max]] bounding box
         for the mask.
         """
         mask_mins_arr = np.array(
@@ -181,29 +175,29 @@ class BCInstrument:
 
     @cached_property
     def mask_cell_size_array(self) -> npt.NDArray[np.float64]:
-        """Mask cell sizes along the SATZ and SATY axes."""
+        """Mask cell sizes along the DETX and DETY axes."""
         return np.array([self._coded_mask.cdelt1, self._coded_mask.cdelt2], np.float64)
 
     @cached_property
-    def saty_pix_size(self) -> float:
-        """Focal plane array [sub]pixel size along the SATY axis."""
+    def dety_pix_size(self) -> float:
+        """Focal plane array [sub]pixel size along the DETY axis."""
         return (
             self._teldef.raw_yscl if self._use_subpixel else self._teldef.raw_yscl * 3
         )
 
     @cached_property
-    def satz_pix_size(self) -> float:
-        """Focal plane array [sub]pixel size along the SATZ axis."""
+    def detx_pix_size(self) -> float:
+        """Focal plane array [sub]pixel size along the DETX axis."""
         return (
             self._teldef.raw_xscl if self._use_subpixel else self._teldef.raw_xscl * 3
         )
 
-    def pixxy_to_satzy(
+    def pixxy_to_detxy(
         self,
         pixxs: npt.NDArray[np.floating[Any]],
         pixys: npt.NDArray[np.floating[Any]],
     ) -> tuple[np.float64, np.float64]:
-        """Convert from (PIXX, PIXY) to (SATZ, SATY).
+        """Convert from (PIXX, PIXY) to (DETX, DETY).
 
         Arguments:
             - pixxs: Numpy array of how many [sub]pixels you are along
@@ -211,27 +205,27 @@ class BCInstrument:
             - pixys: Numpy array of how many [sub]pixels you are along
             the y axis from the center of the lower-left FPA [sub]pixel.
         """
-        satz_low, saty_low = self.fpa_envelope[0]
-        satzs = pixxs * self.satz_pix_size + satz_low
-        satys = pixys * self.saty_pix_size + saty_low
-        return satzs, satys
+        detx_low, dety_low = self.fpa_envelope[0]
+        detxs = pixxs * self.detx_pix_size + detx_low
+        detys = pixys * self.dety_pix_size + dety_low
+        return detxs, detys
 
-    def satzy_to_pixxy(
+    def detxy_to_pixxy(
         self,
-        satzs: npt.NDArray[np.floating[Any]],
-        satys: npt.NDArray[np.floating[Any]],
+        detxs: npt.NDArray[np.floating[Any]],
+        detys: npt.NDArray[np.floating[Any]],
     ) -> tuple[np.float64, np.float64]:
-        """Convert from (SATZ, SATY) to (PIXX, PIXY).
+        """Convert from (DETX, DETY) to (PIXX, PIXY).
 
         PIXX and PIXY count how many [sub]pixels you are along the
         respective axes from the center of the lower-left FPA
         [sub]pixel.
 
         Arguments:
-            - satzs: Numpy array of SATZ values.
-            - satys: Numpy array of SATY values.
+            - detxs: Numpy array of DETX values.
+            - detys: Numpy array of DETY values.
         """
-        satz_low, saty_low = self.fpa_envelope[0]
-        pixxs = ((satzs - satz_low) * (1 / self.satz_pix_size)).astype(np.float64)
-        pixys = ((satys - saty_low) * (1 / self.saty_pix_size)).astype(np.float64)
+        detx_low, dety_low = self.fpa_envelope[0]
+        pixxs = ((detxs - detx_low) * (1 / self.detx_pix_size)).astype(np.float64)
+        pixys = ((detys - dety_low) * (1 / self.dety_pix_size)).astype(np.float64)
         return pixxs, pixys

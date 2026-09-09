@@ -72,7 +72,7 @@ class BCImager:
             caldb_version, coded_mask_file, teldef_file, use_subpixel
         )
 
-        self._resolution_detpix = (resolution * np.array([1, 1])).astype(np.uint32)
+        self._resolution_detpix = (resolution * np.array([1, 1])).astype(np.int32)
         self._balance_per_det = balance_per_det
         self._hide_frame = hide_frame
 
@@ -88,8 +88,8 @@ class BCImager:
         """Bounding boxes to be used for balancing each detector plane
         histogram individually.
 
-        Takes the form [[[satzlow0, satylow0], [satzhigh0, satyhigh0]],
-        ..., [[satzlown, satylown], [satzhighn, satyhighn]]]
+        Takes the form [[[detxlow0, detylow0], [detxhigh0, detyhigh0]],
+        ..., [[detxlown, detylown], [detxhighn, detyhighn]]]
         """
         balance = (
             self._instrument.detector_boxes
@@ -99,13 +99,13 @@ class BCImager:
         return balance
 
     @cached_property
-    def dph_minshape(self) -> npt.NDArray[np.uint32]:
+    def dph_minshape(self) -> npt.NDArray[np.int32]:
         """Shape that the full focal plane detector plane histogram
         will take.
         """
         dph_minsize = (
             self._instrument.fpa_pixel_counts / self._resolution_detpix
-        ).astype(np.uint32)
+        ).astype(np.int32)
         # ::-1 since minsize is (x, y) and shape is (y, x)
         return dph_minsize[::-1]
 
@@ -127,44 +127,44 @@ class BCImager:
         [[maskx_min, masky_min], [maskx_max, masky_max]] = (
             self._instrument.mask_envelope
         )
-        min_satzs_hit = maskx_min - mask_xoffs_m
-        max_satzs_hit = maskx_max - mask_xoffs_m
-        min_satys_hit = masky_min - mask_yoffs_m
-        max_satys_hit = masky_max - mask_yoffs_m
+        min_detxs_hit = maskx_min - mask_xoffs_m
+        max_detxs_hit = maskx_max - mask_xoffs_m
+        min_detys_hit = masky_min - mask_yoffs_m
+        max_detys_hit = masky_max - mask_yoffs_m
 
         det_exposure_dict = {}
         for det_id in self._instrument.teldef.det_ids:
-            [[satz_min, saty_min], [satz_max, saty_max]] = (
+            [[detx_min, dety_min], [detx_max, dety_max]] = (
                 self._instrument.detector_boxes[det_id]
             )
 
-            satz_min_array = min_satzs_hit.copy()
-            satz_min_array[satz_min_array <= satz_min] = satz_min
-            satz_max_array = max_satzs_hit.copy()
-            satz_max_array[satz_max_array >= satz_max] = satz_max
-            satz_range_array = satz_max_array - satz_min_array
-            satz_range_array[satz_range_array <= 0] = 0
+            detx_min_array = min_detxs_hit.copy()
+            detx_min_array[detx_min_array <= detx_min] = detx_min
+            detx_max_array = max_detxs_hit.copy()
+            detx_max_array[detx_max_array >= detx_max] = detx_max
+            detx_range_array = detx_max_array - detx_min_array
+            detx_range_array[detx_range_array <= 0] = 0
 
-            saty_min_array = min_satys_hit.copy()
-            saty_min_array[saty_min_array <= saty_min] = saty_min
-            saty_max_array = max_satys_hit.copy()
-            saty_max_array[saty_max_array >= saty_max] = saty_max
-            saty_range_array = saty_max_array - saty_min_array
-            saty_range_array[saty_range_array <= 0] = 0
+            dety_min_array = min_detys_hit.copy()
+            dety_min_array[dety_min_array <= dety_min] = dety_min
+            dety_max_array = max_detys_hit.copy()
+            dety_max_array[dety_max_array >= dety_max] = dety_max
+            dety_range_array = dety_max_array - dety_min_array
+            dety_range_array[dety_range_array <= 0] = 0
 
-            det_exposure_dict[det_id] = satz_range_array * saty_range_array
+            det_exposure_dict[det_id] = detx_range_array * dety_range_array
 
         return det_exposure_dict
 
     @cached_property
-    def image_fftshape(self) -> npt.NDArray[np.uint32]:
+    def image_fftshape(self) -> npt.NDArray[np.int32]:
         """Shape the image fft arrays will take."""
-        return 2 ** np.ceil(np.log2(self.image_minshape)).astype(np.uint32)
+        return 2 ** np.ceil(np.log2(self.image_minshape)).astype(np.int32)
 
     @cached_property
-    def image_minshape(self) -> npt.NDArray[np.uint32]:
+    def image_minshape(self) -> npt.NDArray[np.int32]:
         """Shape the final sky image will take."""
-        return (self.dph_minshape + self.mask_minshape).astype(np.uint32)
+        return (self.dph_minshape + self.mask_minshape).astype(np.int32)
 
     @cached_property
     def mask_for_correlate(self) -> npt.NDArray[np.complex64]:
@@ -202,13 +202,13 @@ class BCImager:
         return self.fft_forward(mask_expanded).conjugate()
 
     @cached_property
-    def mask_minshape(self) -> npt.NDArray[np.uint32]:
+    def mask_minshape(self) -> npt.NDArray[np.int32]:
         """Shape the scaled mask pattern array will take. Depends on
         resolution.
         """
         mask_minsize = (
             self._instrument.mask_cell_count / self.resolution_maskpix
-        ).astype(np.uint32)
+        ).astype(np.int32)
         # ::-1 since minsize is (x, y) and shape is (y, x)
         return mask_minsize[::-1]
 
@@ -237,10 +237,7 @@ class BCImager:
     def _counts_to_dph(self, counts: npt.NDArray[np.void]) -> npt.NDArray[np.float32]:
         # Convert eventlist counts to a detector plane histogram.
 
-        _, satys, satzs = self.instrument.teldef.detxyz_to_satxyz(
-            counts["DETX"], counts["DETY"]
-        )
-        pixxs, pixys = self.instrument.satzy_to_pixxy(satzs, satys)
+        pixxs, pixys = self.instrument.detxy_to_pixxy(counts["DETX"], counts["DETY"])
 
         i, j = [
             (d // scale).astype(int)
@@ -264,21 +261,21 @@ class BCImager:
         )
 
         if self.balance_boxes is not False:
-            for [[min_satz, min_saty], [max_satz, max_saty]] in self.balance_boxes:
+            for [[min_detx, min_dety], [max_detx, max_dety]] in self.balance_boxes:
                 [min_pixx, max_pixx], [min_pixy, max_pixy] = (
-                    self.instrument.satzy_to_pixxy(
-                        np.array([min_satz, max_satz], dtype=np.float64),
-                        np.array([min_saty, max_saty], dtype=np.float64),
+                    self.instrument.detxy_to_pixxy(
+                        np.array([min_detx, max_detx], dtype=np.float64),
+                        np.array([min_dety, max_dety], dtype=np.float64),
                     )
                     / self._resolution_detpix[:, np.newaxis]
                 )
 
                 [min_pixx, min_pixy] = np.clip(
                     np.ceil([min_pixx, min_pixy]), a_min=0, a_max=None
-                ).astype(np.uint32)
+                ).astype(np.int32)
                 [max_pixx, max_pixy] = np.clip(
                     np.floor([max_pixx, max_pixy]), a_min=0, a_max=None
-                ).astype(np.uint32)
+                ).astype(np.int32)
 
                 dph[min_pixx:max_pixx, min_pixy:max_pixy] -= dph[
                     min_pixx:max_pixx, min_pixy:max_pixy
@@ -291,13 +288,15 @@ class BCImager:
 
         dph_expanded = np.zeros(self.image_fftshape, dtype=np.float32)
         # Need to flip dphx when expanding to match desired alignment
-        dph_expanded[: dph.shape[0], : dph.shape[1]] = dph[:, ::-1]
+        dph_expanded[: dph.shape[0], : dph.shape[1]] = dph
         dph_fft = self.fft_forward(dph_expanded)
         corr_fft = dph_fft * self.mask_for_correlate
-        image = self.fft_inverse(corr_fft)[::-1, ::-1][
-            : self.image_minshape[0], : self.image_minshape[1]
+        image = self.fft_inverse(corr_fft)[
+            -self.image_minshape[0]:, -self.image_minshape[1]:
         ]
-        return image
+        # TODO: Update once we've got SAT coordinates defined in caldb
+        # Flip x-axis to properly rotate around to be looking through the mask
+        return image[:, ::-1]
 
     def image_counts(self, counts: npt.NDArray[np.void]) -> npt.NDArray[np.float32]:
         """Generate sky image from eventlists counts.
