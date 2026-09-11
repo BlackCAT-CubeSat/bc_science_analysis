@@ -249,7 +249,7 @@ class BCImageAnalysis:
             result["global_rms"] = image.std()
             result["local_sig"] = result["counts"] / result["local_rms"]
             result["global_sig"] = result["counts"] / result["global_rms"]
-            # If a detector has only a few events in the eventlist, 
+            # If a detector has only a few events in the eventlist,
             # micro-scale noise will be falsely identified as a peak.
             result = result[result["counts"] >= 1]
 
