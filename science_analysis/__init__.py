@@ -8,4 +8,4 @@ from science_analysis.helpers import *
 
 __author__ = """Timothy R. Emeigh"""
 __email__ = "tre8@psu.edu"
-__version__ = "0.2.0"
+__version__ = "0.2.1"
