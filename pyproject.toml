@@ -18,7 +18,7 @@ classifiers = [
 
 dependencies = [
     "astropy",
-    "bc_caldb @ git+ssh://git@github.com/TimothyRE99/bc_caldb.git",
+    "bc_caldb @ git+ssh://git@github.com/BlackCAT-CubeSat/bc_caldb.git",
     "numpy",
     "photutils",
     "reproject",
