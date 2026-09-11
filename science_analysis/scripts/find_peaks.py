@@ -40,7 +40,7 @@ def find_peaks(
     image_path: PathLike | str,
     imager: BCImageAnalysis,
     show: bool = False,
-) -> None:
+) -> npt.NDArray[np.void]:
     """Locate peaks and peak quantities in a provided blackcat image.
 
     Arguments:
@@ -63,6 +63,8 @@ def find_peaks(
                 ax.set_title(f"{image_path.name} has {len(peaks)} peaks.")
                 plt.show()
                 plt.close(fig)
+
+        return peaks
 
 
 def main() -> None:
