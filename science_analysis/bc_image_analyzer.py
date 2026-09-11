@@ -161,9 +161,7 @@ class BCImageAnalysis:
         outfile: Optional[PathLike | str] = None,
     ) -> fits.PrimaryHDU:
         """Create a sky image from provided event data. Event
-        positions should be provided in DET coordinates. Nominally,
-        (DETX_axis, DETY_axis) are aligned with (-SATZ_axis,
-        -SATY_axis).
+        positions should be provided in DET coordinates.
 
         Returns a FITs HDU. Writes that HDU to a fits file if a path
         is provided.
@@ -249,8 +247,11 @@ class BCImageAnalysis:
             result["counts"] = image[locations[:, 1], locations[:, 0]]
             result["local_rms"] = local_rms[locations[:, 1], locations[:, 0]]
             result["global_rms"] = image.std()
-            result["local_sig"] = result["impeak"] / result["local_rms"]
-            result["global_sig"] = result["impeak"] / result["global_rms"]
+            result["local_sig"] = result["counts"] / result["local_rms"]
+            result["global_sig"] = result["counts"] / result["global_rms"]
+            # If a detector has only a few events in the eventlist, 
+            # micro-scale noise will be falsely identified as a peak.
+            result = result[result["counts"] >= 1]
 
         return result
 
@@ -318,6 +319,7 @@ class BCImageAnalysis:
         self._ra_dec_roll = [ra, dec, roll]
 
     def _add_wcs_keywords(self, hdu: fits.PrimaryHDU) -> fits.PrimaryHDU:
+        # TODO: Update once we've got SAT coordinates defined in caldb
         # Calculates and adds WCS keywords to the provided HDU
 
         # WCS keywords refer to the center of the pixel, but 1-idx origin
@@ -349,7 +351,8 @@ class BCImageAnalysis:
             "(0,0) is lower left; SouthEast if roll=0",
         )
 
-        crota_radians = self.imager.instrument.teldef.rollsign * np.radians(pixroll)
+        # crota_radians = self.imager.instrument.teldef.rollsign * np.radians(pixroll)
+        crota_radians = -1 * np.radians(pixroll)
         cos_r = np.cos(crota_radians)
         sin_r = np.sin(crota_radians)
 

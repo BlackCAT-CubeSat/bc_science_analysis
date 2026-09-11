@@ -7,30 +7,12 @@ from typing import Optional
 import warnings
 
 from astropy.io import fits
-from astropy.wcs import FITSFixedWarning, WCS
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
+from astropy.wcs import FITSFixedWarning
 import matplotlib.pyplot as plt
 import numpy as np
 
 from bc_caldb import CURRENT_CALDB_VER
-from science_analysis import BCImageAnalysis
-
-
-def grab_caldb(
-    caldb: list[str],
-) -> tuple[Optional[str], Optional[Path], Optional[Path]]:
-    if len(caldb) == 1:
-        return caldb[0], None, None
-
-    if len(caldb) == 2:
-        coded_mask = Path(caldb[0])
-        teldef = Path(caldb[1])
-        return None, coded_mask, teldef
-
-    raise ValueError(
-        "You must provide a caldb version, or paths to a coded mask file and teldef file."
-    )
+from science_analysis import BCImageAnalysis, initialize_imager, plot_image
 
 
 def extract_paths(l1_dir: PathLike | str, obsid: str) -> tuple[Path, Path, Path]:
@@ -98,31 +80,11 @@ def image_eventlist(
     return imager.eventlist_to_image(counts=events, header=header, add_wcs=True)
 
 
-def plot_image(image_hdu: fits.PrimaryHDU) -> tuple[Figure, Axes]:
-    """Plot the image within an image hdu on RA/DEC axes."""
-    fig, ax = plt.subplots(subplot_kw={"projection": WCS(image_hdu.header)})
-
-    plotted_image = ax.imshow(
-        image_hdu.data, origin="lower", aspect="equal", cmap="inferno"
-    )
-    fig.colorbar(plotted_image, ax=ax, label="Counts")
-
-    ax.grid(True, color="white", ls="dotted")
-    ax.set_xlabel(f"{ax.get_xlabel().split('.')[-1].upper()} (J2000)")
-    ax.set_ylabel(f"{ax.get_ylabel().split('.')[-1].upper()} (J2000)")
-
-    return fig, ax
-
-
 def image_observation(
+    *,
     obsids: list[str],
     l1_dir: PathLike | str,
-    caldb: list[str],
-    use_subpixel: bool = False,
-    resolution: int = 1,
-    global_balance: bool = False,
-    show_frame: bool = False,
-    overwrite: bool = False,
+    imager: BCImageAnalysis,
     show: bool = False,
     outdir: Optional[PathLike | str] = None,
 ) -> list[fits.PrimaryHDU]:
@@ -131,35 +93,12 @@ def image_observation(
     Arguments:
         - obsids: List of observations to generate images for.
         - l1_dir: Path to the base directory holding level1 fits files.
-        - caldb: List of a caldb version or list of paths to
-        coded_mask file and teldef file.
-        - use_subpixel: Whether to use subpixels for imaging or full
-        pixels.
-        - resolution: Resolution of image (det. [sub]pix projected by
-        focal length).
-        - global_balance: Whether to globally balance the image or
-        balance per-detector.
-        - show_frame: Whether to show the frame or set its opacity to
-        50% to produce a smoother sky image.
-        - overwrite: Whether to overwrite existing files with shared
-        names, or to raise exceptions.
+        - imager: Initialized BCImageAnalysis object to use for the
+        imaging.
         - show: Whether to show a plot of the produced image.
         - outdir: (Optional) Path to save produced images to. Defaults
         to the observation directory if not provided.
     """
-    caldb_version, coded_mask, teldef = grab_caldb(caldb)
-
-    imager = BCImageAnalysis(
-        caldb_version=caldb_version,
-        coded_mask_file=coded_mask,
-        teldef_file=teldef,
-        use_subpixel=use_subpixel,
-        resolution=resolution,
-        balance_per_det=~global_balance,
-        hide_frame=~show_frame,
-        overwrite=overwrite,
-    )
-
     image_hdus = []
     for obsid in obsids:
         if not isinstance(obsid, str):
@@ -174,7 +113,7 @@ def image_observation(
 
         outdir = obs_path if outdir is None else Path(outdir)
         outfile = outdir / f"bl{obsid}.img.gz"
-        image_hdu.writeto(outfile, overwrite=overwrite, checksum=True)
+        image_hdu.writeto(outfile, overwrite=imager.overwrite, checksum=True)
         image_hdus.append(image_hdu)
 
         if show:
@@ -205,6 +144,11 @@ def main() -> None:
         help="Directory to where level1 files are stored. Don't include year/month/day/obsid subpaths.",
         type=str,
         default="/archive/science_operations/level1/",
+    )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Show each image before moving on to next observation id.",
     )
     parser.add_argument(
         "--outdir",
@@ -244,12 +188,23 @@ def main() -> None:
         action="store_true",
         help="Overwrite any files with existing names instead of raising exception.",
     )
-    parser.add_argument(
-        "--show",
-        action="store_true",
-        help="Show each image before moving on to next observation id.",
+    args = parser.parse_args()
+
+    imager = initialize_imager(
+        caldb=args.caldb,
+        use_subpixel=args.use_subpixel,
+        resolution=args.resolution,
+        global_balance=args.global_balance,
+        show_frame=args.show_frame,
+        overwrite=args.overwrite,
     )
-    image_observation(**vars(parser.parse_args()))
+    image_observation(
+        obsids=args.obsids,
+        l1_dir=args.l1_dir,
+        show=args.show,
+        outdir=args.outdir,
+        imager=imager,
+    )
 
 
 if __name__ == "__main__":
