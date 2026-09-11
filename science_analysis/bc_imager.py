@@ -229,9 +229,12 @@ class BCImager:
     @cached_property
     def sky_pixel_size_rad(self) -> npt.NDArray[np.float64]:
         """Tangent plane projection sky pixel size in radians."""
-        sky_pix_size_rad = np.arctan(
-            self._instrument.fpa_pix_size_array / self._instrument.teldef.focallen
-        ).astype(np.float64)
+        sky_pix_size_rad = (
+            np.arctan(
+                self._instrument.fpa_pix_size_array / self._instrument.teldef.focallen
+            ).astype(np.float64)
+            * self._resolution_detpix
+        )
         return sky_pix_size_rad
 
     def _counts_to_dph(self, counts: npt.NDArray[np.void]) -> npt.NDArray[np.float32]:
