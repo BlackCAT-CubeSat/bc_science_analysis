@@ -292,7 +292,7 @@ class BCImager:
         dph_fft = self.fft_forward(dph_expanded)
         corr_fft = dph_fft * self.mask_for_correlate
         image = self.fft_inverse(corr_fft)[
-            -self.image_minshape[0]:, -self.image_minshape[1]:
+            -self.image_minshape[0] :, -self.image_minshape[1] :
         ]
         # TODO: Update once we've got SAT coordinates defined in caldb
         # Flip x-axis to properly rotate around to be looking through the mask
