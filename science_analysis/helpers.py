@@ -44,8 +44,8 @@ def initialize_imager(
         teldef_file=teldef,
         use_subpixel=use_subpixel,
         resolution=resolution,
-        balance_per_det=~global_balance,
-        hide_frame=~show_frame,
+        balance_per_det=not global_balance,
+        hide_frame=not show_frame,
         overwrite=overwrite,
     )
     return imager
